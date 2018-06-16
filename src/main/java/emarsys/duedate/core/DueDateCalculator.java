@@ -2,88 +2,127 @@ package emarsys.duedate.core;
 
 import java.util.Calendar;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
 
-import emarsys.duedate.model.TimeUnitParameters;
+import emarsys.duedate.model.TimeUnit;
 
 /**
  * Due date calculator, emarsys homework.
+ *
  * @author almge
  *
  */
 public class DueDateCalculator {
 
-//	private static final int WORK_WEEK_LENGTH = 5;
-//	private static final int DAY_LENGTH = 24;
-	
-	private static final int WORKDAY_END = 17;
-	private static final int WORKDAY_START = 9;
-	private static final int WORKDAY_LENGTH = WORKDAY_END - WORKDAY_START;
-	
-	private static final int WEEK_START= 2;
-	private static final int WEEK_END= 6;
-	private static final int WEEK_LENGTH= WEEK_END - WEEK_START;
-	
-//	private static final int FREE_TIME_LENGTH = DAY_LENGTH-WORKDAY_LENGTH;
+	protected static final int LAST_WORKHOUR = 17;
+	protected static final int FIRST_WORKHOUR = 9;
+	protected static final int WORKDAY_LENGTH = LAST_WORKHOUR - FIRST_WORKHOUR;
 
-	private static Map<String, TimeUnitParameters> parameterMap = new HashMap();
-	{
-		parameterMap.put("DAY", new TimeUnitParameters(WORKDAY_LENGTH, WORKDAY_START, WORKDAY_END));
-		parameterMap.put("WEEK", new TimeUnitParameters(WEEK_LENGTH, WEEK_START, WEEK_END));
-	}
-	
-	public static void main(String[] args) {
-		
-		final int turnaroundTime = 10;
-		final Date submitDate = new Date();
-		
-		System.out.println(
-				calculateDueDate(submitDate, turnaroundTime)
-		);
+	protected static final int FIRST_WORKDAY = 2;
+	protected static final int WEEK_LENGTH = 5;
 
+	protected static final int FIRST_WORKWEEK = 1;
+	protected static final int YEAR_LENGTH = 52;
+
+	/**
+	 * Define time unit list in incrementing order. For example if the turnaround
+	 * time was given in minutes, a new element like "new TimeUnit(45, 15,
+	 * Calendar.MINUTE)" should be added to the head of the list and this would be
+	 * able to calculate dueDate for a situation where only the last 45 minutes in
+	 * every (work) hour was considered worktime.
+	 */
+	protected static List<TimeUnit> unitList = new LinkedList<TimeUnit>();
+	static {
+		// unitList.add(new TimeUnit(45, 15, Calendar.MINUTE));
+		unitList.add(new TimeUnit(WORKDAY_LENGTH, FIRST_WORKHOUR, Calendar.HOUR_OF_DAY));
+		unitList.add(new TimeUnit(WEEK_LENGTH, FIRST_WORKDAY, Calendar.DAY_OF_WEEK));
+		unitList.add(new TimeUnit(YEAR_LENGTH, FIRST_WORKWEEK, Calendar.WEEK_OF_YEAR));
+		unitList.add(new TimeUnit(Integer.MAX_VALUE, 0, Calendar.YEAR));
 	}
 
-	private static Date calculateDueDate(Date submitDate, int turnaroundTime) {
-		Calendar dueDate = Calendar.getInstance();
+	public static void main(final String[] args) {
+	}
+
+	public static Date calculateDueDate(final Date submitDate, final int turnaroundTime) {
+		final Queue<TimeUnit> unitQueue = new LinkedList<TimeUnit>(unitList);
+
+		return processNextQueueItem(getDueDateCalendar(submitDate), turnaroundTime, unitQueue);
+	}
+
+	protected static Calendar getDueDateCalendar(final Date submitDate) {
+		final Calendar dueDate = Calendar.getInstance();
 		dueDate.setTime(submitDate);
-		
-		add(	
-			dueDate, 
-			Calendar.HOUR_OF_DAY, 
-			parameterMap.get("DAY")
-		);
-		
-		
-//		int dayCount = turnaroundTime / WORKDAY_LENGTH;
-//		int weekCount = dayCount % WORK_WEEK_LENGTH;
-//		int remHours = turnaroundTime % WORKDAY_LENGTH;
-//		
-//		dueDate.add(Calendar.DAY_OF_YEAR, dayCount);
-//		dueDate.add(Calendar.HOUR_OF_DAY, remHours);
-//		
-//		// If the hour at the end of increment is equals or larger than the end workhour, the most likely we are out of worktime for the day (assuming we count seconds or milliseconds)
-//		if (dueDate.get(Calendar.HOUR_OF_DAY) == WORKDAY_END_HOUR && dueDate.get(Calendar.MINUTE) == 0) {
-//			
-//		}
-//		if (dueDate.get(Calendar.HOUR_OF_DAY) >= WORKDAY_END_HOUR) {
-//			
-//		}
-		
-		return dueDate.getTime();
-	}
-	
-	private static int add(Calendar time, int type, int shiftAmount, TimeUnitParameters parameters) {
-		int startValue = time.get(type) - parameters.START; 
-		int shiftedValue = startValue + shiftAmount;
-		
-		int remValue = shiftedValue / parameters.LENGTH;
-		int newValue = shiftedValue % parameters.LENGTH;
-		
-		time.set(type, newValue + parameters.START);
-		
-		return remValue;
+		return dueDate;
 	}
 
-	
+	/**
+	 * Processes time unit queue items recursively. Once the queue is empty it
+	 * returns the final date value.
+	 *
+	 * @param time
+	 *            - Calendar instance to modify time for.
+	 * @param turnaroundTime
+	 *            - turnaround time to calculate incrementing amount from. It's unit
+	 *            is expected to be the current queue item's Calendar type
+	 *            (HOUR_OF_DAY, DAY_OF_THE_WEEK, etc...).
+	 * @param unitQueue
+	 *            - unit queue to process elements from.
+	 * @return
+	 */
+	protected static Date processNextQueueItem(final Calendar time, final int turnaroundTime,
+			final Queue<TimeUnit> unitQueue) {
+
+		if (unitQueue.peek() != null) {
+			final TimeUnit unit = unitQueue.poll();
+
+			final int overflow = setNewUnitValue(time, calculateUnitIncrement(turnaroundTime, unit), unit);
+
+			return processNextQueueItem(time, calculateNewTurnaroundTime(turnaroundTime, unit, overflow), unitQueue);
+		} else {
+			return time.getTime();
+		}
+	}
+
+	protected static int calculateNewTurnaroundTime(final int turnaroundTime, final TimeUnit unit, final int overflow) {
+		return turnaroundTime / unit.LENGTH + overflow;
+	}
+
+	/**
+	 * Updates the given Calendar's value in unit.TYPE units by unitIncrementAmount
+	 * and returns the overflow.
+	 *
+	 * @param time
+	 *            - Calendar instance to modify time for.
+	 * @param unitIncrementAmount
+	 *            - increment amount for current unit.
+	 * @param unit
+	 *            - parameters for processed time unit.
+	 * @return
+	 */
+	protected static int setNewUnitValue(final Calendar time, final int unitIncrementAmount, final TimeUnit unit) {
+		final int incrementedValue = calculateUnitRelativeValue(time, unit) + unitIncrementAmount;
+
+		time.set(unit.TYPE, calculateNewUnitValue(unit, incrementedValue));
+
+		return calculateOverflow(unit, incrementedValue);
+	}
+
+	protected static int calculateOverflow(final TimeUnit unit, final int incrementedValue) {
+		return incrementedValue / unit.LENGTH;
+	}
+
+	protected static int calculateNewUnitValue(final TimeUnit unit, final int incrementedValue) {
+		return incrementedValue % unit.LENGTH + unit.START;
+	}
+
+	protected static int calculateUnitIncrement(final int turnaroundTime, final TimeUnit unit) {
+		return turnaroundTime % unit.LENGTH;
+	}
+
+	protected static int calculateUnitRelativeValue(final Calendar time, final TimeUnit unit) {
+		return time.get(unit.TYPE) - unit.START;
+	}
+
 }
